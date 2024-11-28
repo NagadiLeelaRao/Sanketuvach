@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
     # Path for exported data, numpy arrays
     EXPORT_PATH = os.path.join('keypoint_data')
-    IMPORT_PATH = os.path.join('Videos_Sentence_Level')
+    IMPORT_PATH = os.path.join('Greetings')
     MAX_FRAME_LENGTH = 30
 
     # Actions that we try to detect

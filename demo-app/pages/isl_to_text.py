@@ -27,7 +27,7 @@ class SignLanguageApp:
         
         # Load ML model
         try:
-            self.model = tf.keras.models.load_model(r"/home/avinash/Documents/Sanketuvach/demo-app/models/model.h5") # set absolute path of the model
+            self.model = tf.keras.models.load_model(r"C:\Users\nagad\Sanketuvach\demo-app\models\model.h5") # set absolute path of the model
             st.success("Model loaded successfully!")
         except Exception as e:
             st.error(f"Error loading model: {e}")

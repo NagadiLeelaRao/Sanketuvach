@@ -17,7 +17,7 @@ if __name__ == "__main__":
     mp_holistic = mp.solutions.holistic
     model = load_model(r"C:\Users\nagad\SanketUvach\models\lstm_v3", pretrained=True, training=False)
     #actions = os.listdir('greetings_data')
-    actions = os.listdir('Videos_Sentence_Level')
+    actions = os.listdir('Greetings')
     cap = cv2.VideoCapture(0)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 
