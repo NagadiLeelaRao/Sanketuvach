@@ -15,7 +15,7 @@ if __name__ == "__main__":
     thresh = 0.85
 
     mp_holistic = mp.solutions.holistic
-    model = load_model(r"C:\Users\nagad\SanketUvach\models\lstm_v3", pretrained=True, training=False)
+    model = load_model(r"C:\Users\nagad\SanketUvach\models\lstm_v1", pretrained=True, training=False)
     #actions = os.listdir('greetings_data')
     actions = os.listdir('Greetings')
     cap = cv2.VideoCapture(0)

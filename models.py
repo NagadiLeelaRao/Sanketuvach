@@ -106,7 +106,7 @@ def compile_model(model):
     model.compile(optimizer=adam, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
     return model
 
-def load_model(name='lstm_v3', pretrained=False, training=True, device=None):
+def load_model(name='lstm_v1', pretrained=False, training=True, device=None):
     if not pretrained:
         if name == 'lstm_v1':
             model = lstm_v1(device)

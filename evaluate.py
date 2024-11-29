@@ -4,7 +4,7 @@ import tensorflow as tf
 from models import load_model
 
 
-model = load_model('lstm_v3')
+model = load_model('lstm_v1')
 print(model.summary())
 
 X_test, y_test = get_data(train=False)

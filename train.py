@@ -25,7 +25,7 @@ y = to_categorical(labels)
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
 
-model = load_model('lstm_v3', pretrained=False, device=device)
+model = load_model('lstm_v1', pretrained=False, device=device)
 callbacks = [
 
     tf.keras.callbacks.ModelCheckpoint("isl_model.keras", save_best_only=True),
