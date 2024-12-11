@@ -1,104 +1,140 @@
-import os
+import streamlit as st
 import cv2
 import numpy as np
-import mediapipe as mp
-from ultralytics import YOLO
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, LSTM, Dropout, TimeDistributed
-from tensorflow.keras.utils import to_categorical
-from sklearn.model_selection import train_test_split
+from inference_sdk import InferenceHTTPClient
+import threading
+import queue
+import time
 
-# Step 1: Load YOLOv8 Model
-model_yolo = YOLO('yolov8n.pt')  # Load pre-trained YOLOv8 model
+class SignLanguageRecognizer:
+    def __init__(self, api_url, api_key, model_id):
+        self.client = InferenceHTTPClient(
+            api_url=api_url,
+            api_key=api_key
+        )
+        self.model_id = model_id
+        self.prediction_queue = queue.Queue()
+        self.prediction_thread = None
+        self.stop_thread = threading.Event()
 
-# Step 2: Initialize MediaPipe for Keypoint Extraction
-mp_holistic = mp.solutions.holistic
-mp_drawing = mp.solutions.drawing_utils
+    def predict_frame(self, frame):
+        # Save the current frame as a temporary file
+        cv2.imwrite('current_frame.jpg', frame)
 
-# Step 3: Data Preprocessing
-def extract_keypoints(video_path, yolo_model):
-    """Extract keypoints using MediaPipe and YOLO from a video."""
-    cap = cv2.VideoCapture(video_path)
-    holistic = mp_holistic.Holistic(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-    keypoints_sequence = []
+        try:
+            # Perform inference
+            result = self.client.infer('current_frame.jpg', model_id=self.model_id)
+            return result
+        except Exception as e:
+            return {"error": str(e)}
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    def prediction_worker(self, frame):
+        result = self.predict_frame(frame)
+        self.prediction_queue.put(result)
 
-        # Use YOLO to detect hands
-        results_yolo = yolo_model(frame, verbose=False)
-        detections= results_yolo[0].boxes.data.cpu().numpy()
-        for box in detections:  # Loop over detected objects
-            x1, y1, x2, y2, conf, cls = box
-            if int(cls) == 0:  # Assuming class 0 is 'hand'
-                hand_roi = frame[int(y1):int(y2), int(x1):int(x2)]
+    def start_prediction(self, frame):
+        # If a prediction thread is already running, wait for it to finish
+        if self.prediction_thread and self.prediction_thread.is_alive():
+            return None
 
-        # Extract keypoints using MediaPipe
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = holistic.process(frame_rgb)
+        # Start a new prediction thread
+        self.prediction_thread = threading.Thread(
+            target=self.prediction_worker, 
+            args=(frame,)
+        )
+        self.prediction_thread.start()
+        return None
 
-        if results.left_hand_landmarks:
-            keypoints = []
-            for lm in results.left_hand_landmarks.landmark:
-                keypoints.extend([lm.x, lm.y, lm.z])
-            keypoints_sequence.append(keypoints)
-        else:
-            keypoints_sequence.append([0] * 63)  # No keypoints detected, pad with zeros
+    def get_prediction(self):
+        try:
+            # Non-blocking check for prediction result
+            return self.prediction_queue.get_nowait()
+        except queue.Empty:
+            return None
 
-    cap.release()
-    holistic.close()
-    return np.array(keypoints_sequence)
+def main():
+    st.title("Sign Language Recognition App")
 
-# Step 4: Prepare Dataset
-def process_video_folders(folder_path, yolo_model):
-    """Process all videos in folders and create dataset."""
-    data = []
-    label_list = []
-    labels_dict = {label: idx for idx, label in enumerate(os.listdir(folder_path))}
+    # Sidebar for API configuration
+    st.sidebar.header("Configuration")
+    api_url = st.sidebar.text_input("API URL", "https://detect.roboflow.com")
+    api_key = st.sidebar.text_input("API Key", type="password")
+    model_id = st.sidebar.text_input("Model ID", "sign-language-recognition-ryzbq/2")
 
-    for label, idx in labels_dict.items():
-        label_folder = os.path.join(folder_path, label)
-        for video_file in os.listdir(label_folder):
-            video_path = os.path.join(label_folder, video_file)
-            keypoints_sequence = extract_keypoints(video_path, yolo_model)
-            data.append(keypoints_sequence)
-            label_list.append(idx)
+    # Prediction results display
+    result_container = st.empty()
 
-    return np.array(data), np.array(label_list), labels_dict
+    # Camera input section
+    run = st.checkbox('Start Camera')
 
-# Example Dataset Path
-dataset_folder = "Greetings"  # Path to the folder containing subfolders for each word
+    if run:
+        # Open camera
+        camera = cv2.VideoCapture(0)
+        
+        # Create placeholders for frame 
+        frame_window = st.image([])
+        predict_button = st.button('Predict Sign Language', key='predict_button')
 
-# Process dataset
-data, labels, labels_dict = process_video_folders(dataset_folder, model_yolo)
-data = np.array([np.pad(seq, ((0, 100 - len(seq)), (0, 0)), mode='constant') for seq in data])  # Pad sequences to length 100
-labels = to_categorical(labels)
+        # Initialize recognizer
+        recognizer = None
+        if api_key:
+            try:
+                recognizer = SignLanguageRecognizer(api_url, api_key, model_id)
+            except Exception as e:
+                st.error(f"Failed to initialize recognizer: {e}")
+                run = False
 
-# Split Dataset
-X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.2, random_state=42)
+        # Frame rate control
+        prev_frame_time = 0
+        new_frame_time = 0
 
-# Step 5: Define CNN+LSTM Model
-def build_model():
-    model = Sequential()
-    model.add(TimeDistributed(Conv2D(32, (3, 3), activation='relu'), input_shape=(100, 63, 1)))  # Adjust dimensions if using raw frames
-    model.add(TimeDistributed(MaxPooling2D((2, 2))))
-    model.add(TimeDistributed(Flatten()))
-    model.add(LSTM(64, return_sequences=True))
-    model.add(Dropout(0.5))
-    model.add(LSTM(32))
-    model.add(Dense(32, activation='relu'))
-    model.add(Dense(labels.shape[1], activation='softmax'))
-    return model
+        # Continuous frame capture and display
+        while run:
+            ret, frame = camera.read()
+            if not ret:
+                st.error("Failed to capture frame")
+                break
 
-# Build and Compile Model
-model = build_model()
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+            # Calculate FPS
+            new_frame_time = time.time()
+            fps = 1/(new_frame_time-prev_frame_time)
+            prev_frame_time = new_frame_time
+            
+            # Convert frame to RGB for display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-# Step 6: Train the Model
-history = model.fit(X_train, y_train, epochs=25, batch_size=8, validation_data=(X_test, y_test))
+            # Display the frame
+            frame_window.image(frame_rgb)
 
-# Step 7: Evaluate the Model
-loss, accuracy = model.evaluate(X_test, y_test)
-print(f"Test Accuracy: {accuracy * 100:.2f}%")
+            # Prediction button logic
+            if predict_button and recognizer:
+                # Start prediction in a separate thread
+                recognizer.start_prediction(frame)
+
+            # Check for prediction results
+            if recognizer:
+                result = recognizer.get_prediction()
+                if result:
+                    if 'error' in result:
+                        result_container.error(f"Prediction error: {result['error']}")
+                    elif result and 'predictions' in result:
+                        predictions = result['predictions']
+                        if predictions:
+                            # Display top prediction
+                            # Display top prediction with large bold text
+                            top_prediction = predictions[0]
+                            predicted_class = top_prediction.get('class', 'Unknown')
+                            result_container.markdown(f"<h1 style='text-align: center; font-weight: bold; font-size: 50px;'>{predicted_class}</h1>", unsafe_allow_html=True)
+                        else:
+                            result_container.warning("No signs detected")
+
+            # Optional: display FPS
+            st.sidebar.text(f"FPS: {fps:.2f}")
+
+        # Cleanup
+        camera.release()
+    else:
+        st.info("Check 'Start Camera' to begin")
+
+if __name__ == "__main__":
+    main()
